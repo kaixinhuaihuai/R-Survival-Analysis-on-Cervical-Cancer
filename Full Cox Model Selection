@@ -1,0 +1,36 @@
+###################################################### 
+  Functions for Full Model Selection on Dataframe
+######################################################
+
+####################################
+Compare p-value after fitting
+####################################
+coxfit <- function(var,data){
+  formula <- as.formula(sprintf("Surv(survday, status==1,type = 'right') ~ %s",var))
+  fit <- coxph(formula,data = data) 
+  if (cox.zph(fit)$table[6]>0.05){
+    summary(fit)[9] 
+  }
+}
+
+coxfitdf <- function(fit){
+  fit = sapply(fit[!sapply(fit,is.null)],unlist) %>% t %>% data.frame
+  colnames(fit) <- gsub('logtest.',"",colnames(fit))
+  rownames(fit) <- gsub('.logtest',"",rownames(fit))
+  fit = fit[order(fit$pvalue),]
+  round(fit,2)
+}
+
+####################################
+Lasso Cox Model Selection
+####################################
+# tmp = data, x = variables
+## Mention: You should not have NA in the data when doing lasso model
+cv.fit <- cv.glmnet(x,Surv(tmp$survday,tmp$status), family = 'cox')
+plot(cv.fit)
+coefs = coef(cv.fit, s = "lambda.min") 
+summ = summary(coefs)
+
+# Show the result through dataframe
+data.frame(variable = rownames(coefs)[summ$i], coef = summ$x)
+
