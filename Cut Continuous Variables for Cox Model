@@ -1,0 +1,85 @@
+################# Functions for Cutting Continuous Variables ################
+
+# Function for Optimal Equal-HP Method (I simply called it "Ucuts")
+Ucuts_f <- function(varname,cutteddata){
+  formula <- as.formula(sprintf('Surv(survday, status==1)~ pspline(%s,df = 0, caic = T)',varname))
+  coxfit <- coxph(formula, data = cutteddata)
+  cuts <- findcutpoints(cox_pspline_fit = coxfit,data = cutteddata)
+  if(length(cuts$optimal)==0){
+    cuts <- findcutpoints(cox_pspline_fit = coxfit,data = cutteddata,shape = 'inverseU')
+  }
+  cuts$optimal
+}
+
+# Function for Hiearchical Bayes Model (I simply called it "hiercut"
+hier_f <- function(varname,cutteddata){
+  res = rhier(times = cutteddata[which(!is.na(cutteddata[varname])),]$survday, 
+              status = cutteddata[which(!is.na(cutteddata[varname])),]$status,
+              x = cutteddata[which(!is.na(cutteddata[varname])),][[varname]]) 
+}
+
+# Fit Univariate Cox Model 
+coxfit <- function(var,data){
+  formula <- as.formula(sprintf("Surv(survday, status==1,type = 'right') ~ %s",var))
+  fit <- coxph(formula,data = data) 
+  if (cox.zph(fit)$table[6]>0.05){
+    summary(fit)[9] 
+  }
+}
+
+# Function for making two cuts
+twocuts <- function(cutfunc,usedata,colname,outputname){
+  cut <- sapply(colname,cutfunc,usedata)
+  if(substitute(cutfunc) == "hier_f"){
+    cuts = cut %>% data.frame %>% t %>% data.frame
+    rownames(cuts) = gsub('.best.splits.hier','',rownames(cuts)) }
+  else{
+    cuts <- cut[sapply(cut,function(x){length(x)!=0})] %>% data.frame %>% t %>% data.frame
+    nocut_var <<-  cut[sapply(cut,function(x){length(x)==0})]  %>% names 
+  }
+  tmp = sapply(rownames(cuts),function(col){
+    sapply(usedata[,col],function(row){
+      if(is.na(row)==F){
+        if(row < cuts[col,1]){ row = '1' }
+        else if(row >= cuts[col,2]) { row = '3'}
+        else{ row = '2' }
+      }
+    })
+  }) %>% data.frame
+  tmp = sapply(tmp,function(x){ sapply(x,unlist) }) %>% data.frame
+  tmp = sapply(tmp,function(col){
+    sapply(col,function(x){
+      ifelse(is.null(x),NA,x)
+    })
+  }) %>% data.frame
+  tmp = lapply(tmp,as.factor)
+  tmp = tmp[sapply(tmp,function(x){ nlevels(x)!=1 })] %>% data.frame
+  assign(paste0(outputname,"df"),tmp,env = .GlobalEnv)
+  tmpname = tmp%>% names
+  tmp$survday = data$survday ; tmp$status = data$status
+  cutcox <- sapply(tmpname,coxfit,tmp)
+  cutcox = sapply(cutcox[!sapply(cutcox,is.null)],unlist) %>% t %>% data.frame
+  colnames(cutcox) <- gsub('logtest.',"",colnames(cutcox))
+  rownames(cutcox) <- gsub('.logtest',"",rownames(cutcox))
+  cutcox = cutcox[order(cutcox$pvalue),]
+  assign(paste0(outputname,"cuts"),cuts,env = .GlobalEnv)
+  assign(outputname,round(cutcox,2),env = .GlobalEnv)
+  
+}
+
+###########       Cut Variables     ##############
+#        Ucut cov       #####
+twocuts(Ucuts_f,numcov,covname,"covU")
+#
+#       hiercut cov     ####
+twocuts(hier_f,numcov,covname,'covH')
+
+#  Compare the results with different cutting method  ####
+cov_vs = merge(covU,covH,by = 'row.names',all = T)
+colnames(cov_vs) = c('covariate','Utest','Udf','Upvalue','Htest','Hdf','Hpvalue')
+rownames(cov_vs) = cov_vs$covariate
+cov_vs = merge(cov_vs,allfit,by = 'row.names',all = T)
+cov_vs$Row.names = NULL 
+# cov_vs$better = mapply(which.max,cov_vs$Utest,cov_vs$Htest,cov_vs$test)
+cov_vs$better = colnames(cov_vs[c('Utest','Htest','test')])[max.col(replace(cov_vs[c('Utest','Htest','test')],is.na(cov_vs[c('Utest','Htest','test')]),-Inf))]
+# cov_vs[-grep('df',colnames(cov_vs))]
