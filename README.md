@@ -1,4 +1,4 @@
-# SurvivalAnalysisForCervicalCancer
+# Survival Analysis on Cervical Cancer
 
 ## Finding Cutpoints for Continuous Variables
 
